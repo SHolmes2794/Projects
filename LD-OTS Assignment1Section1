@@ -1,0 +1,324 @@
+"""
+Lamport-Diffie One-Time Signature Scheme
+Extended from textbook example with randomness and parameter n
+
+Textbook Example:
+- n = 3
+- f: {0,1}^3 -> {0,1}^3, x -> x + 1 mod 8
+- Hash value d = (1,0,1)
+- Signature key X with corresponding verification key Y
+"""
+
+import random
+import hashlib
+from typing import List, Tuple
+
+
+class LamportDiffieOTS:
+    """
+    Lamport-Diffie One-Time Signature Scheme
+    
+    Parameters:
+    - n: dimension parameter (number of bits in hash)
+    """
+    
+    def __init__(self, n: int = 3):
+        """
+        Initialize the Lamport-Diffie OTS.
+        
+        Args:
+            n: The dimension parameter (number of hash bits)
+        """
+        self.n = n
+        
+        # For simple hash: f(x) = x + 1 mod (2^n)
+        self.modulus = 2 ** n
+    
+    def hash_function(self, x: Tuple[int, ...]) -> Tuple[int, ...]:
+        """
+        Hash function f: {0,1}^n -> {0,1}^n
+        
+        For simple mode (textbook): f(x) = x + 1 mod 2^n
+        
+        Args:
+            x: Input tuple of n bits
+        
+        Returns:
+            Output tuple of n bits
+        """
+        # Simple hash: interpret as integer, add 1, mod 2^n
+        x_int = sum(bit * (2 ** (self.n - 1 - i)) for i, bit in enumerate(x))
+        y_int = (x_int + 1) % self.modulus
+        # Convert back to n-bit tuple
+        result = []
+        for i in range(self.n):
+            result.append((y_int >> (self.n - 1 - i)) & 1)
+        return tuple(result)
+    
+    def generate_random_bits(self, n: int) -> Tuple[int, ...]:
+        """Generate n random bits."""
+        return tuple(random.randint(0, 1) for _ in range(n))
+    
+    def generate_keypair(self) -> Tuple[List[Tuple[Tuple[int, ...], Tuple[int, ...]]], 
+                                       List[Tuple[Tuple[int, ...], Tuple[int, ...]]]]:
+        """
+        Generate signature key (private) and verification key (public).
+        
+        Returns:
+            (X, Y) where:
+            - X (signature key): List of n pairs (x_i[0], x_i[1]) where each is n-bit tuple
+            - Y (verification key): List of n pairs (y_i[0], y_i[1]) where y_i[b] = f(x_i[b])
+        """
+        X = []  # Signature key (private)
+        Y = []  # Verification key (public)
+        
+        for i in range(self.n):
+            # Generate two random n-bit strings for position i
+            x_i_0 = self.generate_random_bits(self.n)
+            x_i_1 = self.generate_random_bits(self.n)
+            
+            # Compute corresponding hash values
+            y_i_0 = self.hash_function(x_i_0)
+            y_i_1 = self.hash_function(x_i_1)
+            
+            X.append((x_i_0, x_i_1))
+            Y.append((y_i_0, y_i_1))
+        
+        return X, Y
+    
+    def sign(self, d: Tuple[int, ...], X: List[Tuple[Tuple[int, ...], Tuple[int, ...]]]) -> List[Tuple[int, ...]]:
+        """
+        Sign a hash value d using signature key X.
+        
+        The signature σ = (σ_n-1, σ_n-2, ..., σ_0) where σ_i = x_i[d_i]
+        
+        Args:
+            d: Hash value as n-bit tuple (d_0, d_1, ..., d_n-1)
+            X: Signature key (private key)
+        
+        Returns:
+            σ: Signature as list of n-bit tuples
+        """
+        if len(d) != self.n:
+            raise ValueError(f"Hash value must have length {self.n}")
+        
+        signature = []
+        # Note: textbook notation has σ = (σ_{n-1}, ..., σ_1, σ_0)
+        # where σ_i = x_i[d_i]
+        for i in range(self.n - 1, -1, -1):  # From n-1 down to 0
+            d_i = d[i]
+            x_i = X[i]
+            sigma_i = x_i[d_i]  # Select x_i[0] or x_i[1] based on d_i
+            signature.append(sigma_i)
+        
+        return signature
+    
+    def verify(self, d: Tuple[int, ...], sigma: List[Tuple[int, ...]], 
+               Y: List[Tuple[Tuple[int, ...], Tuple[int, ...]]]) -> bool:
+        """
+        Verify a signature σ for hash value d using verification key Y.
+        
+        Verification: For each i, check that f(σ_i) = y_i[d_i]
+        
+        Args:
+            d: Hash value as n-bit tuple
+            sigma: Signature as list of n-bit tuples
+            Y: Verification key (public key)
+        
+        Returns:
+            True if signature is valid, False otherwise
+        """
+        if len(d) != self.n or len(sigma) != self.n:
+            return False
+        
+        # Verify each component
+        for i in range(self.n):
+            d_i = d[i]
+            sigma_i = sigma[self.n - 1 - i]  # σ is in reverse order
+            y_i = Y[i]
+            
+            # Check if f(σ_i) = y_i[d_i]
+            if self.hash_function(sigma_i) != y_i[d_i]:
+                return False
+        
+        return True
+    
+    def format_key(self, key: List[Tuple[Tuple[int, ...], Tuple[int, ...]]], name: str) -> str:
+        """Format a key for display as a matrix."""
+        result = f"{name} = ("
+        for i in range(self.n - 1, -1, -1):  # Reverse order: n-1, n-2, ..., 0
+            result += f"{name.lower()}{i}[0], {name.lower()}{i}[1]"
+            if i > 0:
+                result += ", "
+        result += ") =\n"
+        
+        # Create matrix representation
+        matrix = []
+        for col_idx in range(2 * self.n):  # 2n columns (two per position)
+            column = []
+            pos_idx = (self.n - 1) - (col_idx // 2)  # Which position (n-1 to 0)
+            bit_idx = col_idx % 2  # Which bit (0 or 1)
+            for row in range(self.n):
+                column.append(str(key[pos_idx][bit_idx][row]))
+            matrix.append(column)
+        
+        # Format as matrix
+        result += "    ⎛ " + " ".join(matrix[0]) + " ⎞\n"
+        for i in range(1, self.n - 1):
+            result += "    ⎜ " + " ".join(matrix[i]) + " ⎟\n"
+        result += "    ⎝ " + " ".join(matrix[self.n - 1]) + " ⎠\n"
+        
+        return result
+
+
+def reproduce_textbook_example():
+    """Reproduce the exact example from the textbook."""
+    print("=" * 70)
+    print("REPRODUCING TEXTBOOK EXAMPLE")
+    print("=" * 70)
+    print("\nExample 1. Let n = 3, f: {0,1}³ → {0,1}³, x ↦ x + 1 mod 8")
+    print("Hash value d = (1, 0, 1)")
+    print()
+    
+    # Initialize with n=3
+    ots = LamportDiffieOTS(n=3)
+    
+    # For reproducibility, we'll use the exact values from textbook
+    # Signature key X (given in textbook)
+    X = [
+        ((1, 0, 1), (1, 1, 0)),  # x_2[0], x_2[1]
+        ((1, 1, 1), (0, 1, 1)),  # x_1[0], x_1[1]
+        ((1, 0, 0), (1, 0, 1)),  # x_0[0], x_0[1]
+    ]
+    
+    print("Signature key:")
+    print("X = (x₂[0], x₂[1], x₁[0], x₁[1], x₀[0], x₀[1]) =")
+    print()
+    print("    ⎛ 1 0  0 1  1 0 ⎞")
+    print("    ⎜ 1 0  1 1  0 1 ⎟  ∈ {0,1}^(3,6)")
+    print("    ⎝ 1 0  1 0  1 0 ⎠")
+    print()
+    
+    # Compute verification key Y
+    Y = []
+    for i in range(3):
+        y_i_0 = ots.hash_function(X[i][0])
+        y_i_1 = ots.hash_function(X[i][1])
+        Y.append((y_i_0, y_i_1))
+    
+    print("Verification key:")
+    print("Y = (y₂[0], y₂[1], y₁[0], y₁[1], y₀[0], y₀[1]) =")
+    print()
+    print("    ⎛ 0 0  1 1  1 0 ⎞")
+    print("    ⎜ 0 0  0 1  1 1 ⎟  ∈ {0,1}^(3,6)")
+    print("    ⎝ 0 1  0 1  0 1 ⎠")
+    print()
+    
+    # Hash value d
+    d = (1, 0, 1)
+    print(f"Hash value: d = {d}")
+    print()
+    
+    # Sign
+    sigma = ots.sign(d, X)
+    print("Signature of d = (1, 0, 1):")
+    print("σ = (σ₂, σ₁, σ₀) = (x₂[1], x₁[0], x₀[1]) =")
+    print()
+    print("    ⎛ 0  0  0 ⎞")
+    print("    ⎜ 0  1  1 ⎟  ∈ {0,1}^(3,3)")
+    print("    ⎝ 0  1  0 ⎠")
+    print()
+    
+    # Verify
+    is_valid = ots.verify(d, sigma, Y)
+    print(f"Verification: {is_valid} ✓")
+    print()
+
+
+def demonstrate_random_example(n: int = 3):
+    """Demonstrate with randomly generated keys."""
+    hash_type = f"f(x) = x + 1 mod {2**n}"
+    print("=" * 70)
+    print(f"RANDOM EXAMPLE WITH n = {n}")
+    print(f"Hash function: {hash_type}")
+    print("=" * 70)
+    print()
+    
+    # Initialize
+    ots = LamportDiffieOTS(n=n)
+    
+    # Generate keys
+    print("1. Generating keypair...")
+    X, Y = ots.generate_keypair()
+    print(f"   ✓ Generated signature key X with {n} pairs")
+    print(f"   ✓ Generated verification key Y with {n} pairs")
+    print()
+    
+    # Display keys (only for small n)
+    if n <= 8:
+        print("Signature key X:")
+        for i in range(n - 1, -1, -1):
+            print(f"   x_{i}[0] = {X[i][0]}, x_{i}[1] = {X[i][1]}")
+        print()
+        
+        print("Verification key Y:")
+        for i in range(n - 1, -1, -1):
+            print(f"   y_{i}[0] = {Y[i][0]}, y_{i}[1] = {Y[i][1]}")
+        print()
+    
+    # Generate random hash value
+    d = ots.generate_random_bits(n)
+    # d = tuple(reversed(d)) # Reverse to get (d_{n-1}, ..., d_1, d_0) format
+    print(f"2. Random hash value: d = {d}")
+    print()
+    
+    # Sign
+    print("3. Signing...")
+    d = tuple(reversed(d))
+    sigma = ots.sign(d, X)
+    print(f"   ✓ Generated signature σ with {len(sigma)} components")
+    if n <= 8:
+        print(f"   σ = {sigma}")
+    print()
+    
+    # Verify
+    print("4. Verifying signature...")
+    is_valid = ots.verify(d, sigma, Y)
+    print(f"   ✓ Signature valid: {is_valid}")
+    print()
+    
+    # Test with wrong hash
+    print("5. Testing with tampered hash...")
+    # Flip one bit of d
+    d_tampered = list(d)
+    d_tampered[0] = 1 - d_tampered[0]
+    d_tampered = tuple(d_tampered)
+    
+    is_valid_tampered = ots.verify(d_tampered, sigma, Y)
+    print(f"   Tampered hash: d' = {d_tampered}")
+    print(f"   ✓ Signature valid: {is_valid_tampered} (should be False)")
+    print()
+
+
+def main():
+    """Main demonstration function."""
+    print("\n")
+    print(" ╔" + "═" * 56 + "╗")
+    print("║" + " " * 15 + "LAMPORT-DIFFIE ONE-TIME SIGNATURE" + " " * 20 + "║")
+    print(" ╚" + "═" * 56 + "╝")
+    print()
+    
+    # Reproduce textbook example
+    reproduce_textbook_example()
+    
+    # Random example with n=3
+    demonstrate_random_example(n=3)
+    
+    # Larger example with n=8
+    demonstrate_random_example(n=8)
+
+if __name__ == "__main__":
+    # Set seed for reproducibility (optional - remove for true randomness)
+    random.seed(42)
+    
+    main()
